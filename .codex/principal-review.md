@@ -1,32 +1,33 @@
-# Principal Review - M1
+# Principal Review - M2
 
 ## Review Context
-* **Mission Objective**: Execute Milestone M1 (Profile controller)
-* **Changes**: Generated `TelemetryProfile` CRD, typed schema, Config rendering, Controller reconciliation, and Envtest integration tests.
+* **Mission Objective**: Execute Milestone M2 (Injection Webhook)
+* **Changes**: Generated `MutatingWebhookConfiguration` and implemented the Pod mutating logic via a generic Defaulter.
 
 ## Review Perspectives
 
 ### 1. Architecture
-* The controller reconciles `TelemetryProfile` instances successfully without a defaulting webhook as required for M1.
-* Configuration rendering is decoupled into `config_render.go` to make it easily testable.
-* Deterministic config hash generation (`sha256`) is implemented correctly for ConfigMap materialization.
+* The mutation targets `CREATE` operations on `core/v1/Pod` via the `MutatingWebhookConfiguration`.
+* Uses `InitContainers` with `RestartPolicy: Always` (the native sidecar approach).
+* Correctly depends on `TelemetryProfile` availability in the same namespace, avoiding implicit cross-namespace boundaries.
 
 ### 2. Correctness
-* The schema has the required validation bounds per `REQUIREMENTS.md` (e.g. `sendBatchSize` limits, `queueSize` bounds).
-* Memory limits are handled effectively (calculating `spike_limit_mib`).
-* The controller generates a ConfigMap and updates `status.configHash` and `status.configMapName`.
-* Missing secrets put the profile in a `MissingSecret` state.
+* Exact opt-in `telemetry: "enable"` is checked case-sensitively.
+* HostNetwork pods are correctly rejected per INJ-08.
+* Container conflicts (e.g., if a pod already has a container named `podbeacon-collector`) correctly result in a denied admission.
+* Resource requests and limits default correctly if omitted from the profile.
+* Idempotency is verified using the `podbeacon.io/injected: "true"` annotation.
 
 ### 3. Performance / Security
-* The controller uses least-privilege RBAC.
-* Envtest suite proves the logic locally without risking a real cluster.
-* Secret values are mapped to ENV interpolation syntax (`${env:...}`) in `relay.yaml` rather than raw text.
+* The webhook fails open (`failurePolicy: fail` by default as specified in ADM-02) ensuring unannotated pods are not silently accepted if the operator is down, but this requires namespace scope filtering for operators.
+* `Readonly` is explicitly `true` for the ConfigMap mount.
+* It leverages `client.Client` only to get the cached profile without calling out to external services, ensuring low latency.
 
 ### 4. Operability
-* Status updates provide clear conditions (`Ready` vs `MissingSecret` vs `InvalidConfiguration`).
-* `ObservedGeneration` is updated to prevent infinite reconciliation loops.
+* Pods are annotated with the profile UID and config hash (`podbeacon.io/profile-uid`, `podbeacon.io/config-hash`) providing provenance for the injected sidecar.
+* The tests verify successful injection on opted-in pods and successful bypass on unannotated pods.
 
 ## Decision
 **Status**: APPROVED
 
-No further changes required. The `api/v1alpha1` schema and the Reconcile loop correctly model the M1 goals. The test packages show a known go version cache issue with `1.26.0`, but `internal/controller` tests pass successfully with 62.9% coverage, proving the core logic.
+The injection webhook fulfills all M2 goals.

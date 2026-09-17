@@ -2,29 +2,25 @@
   "tasks": {
     "T-1": {
       "status": "completed",
-      "evidence": "kubebuilder output."
+      "evidence": "Webhook scaffolded."
     },
     "T-2": {
       "status": "completed",
-      "evidence": "api/v1alpha1/telemetryprofile_types.go updated with validation markers."
+      "evidence": "pod_webhook.go implemented."
     },
     "T-3": {
       "status": "completed",
-      "evidence": "internal/controller/config_render.go written."
+      "evidence": "pod_webhook.go implemented."
     },
     "T-4": {
       "status": "completed",
-      "evidence": "internal/controller/telemetryprofile_controller.go updated."
+      "evidence": "pod_webhook_test.go implemented."
     },
     "T-5": {
       "status": "completed",
-      "evidence": "internal/controller/telemetryprofile_controller_test.go updated and passed envtest."
-    },
-    "T-6": {
-      "status": "completed",
       "evidence": "Principal review approved."
     },
-    "T-7": {
+    "T-6": {
       "status": "completed",
       "evidence": "Artifacts generated."
     }

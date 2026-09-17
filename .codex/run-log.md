@@ -1,24 +1,20 @@
-# Mission Run Log - M1
+# Mission Run Log - M2
 
 ## Phase 0-4: Planning
-* Reconnaissance mapped the initial `kubebuilder init`.
-* Formulated Task DAG and validation gates for M1.
-* Selected single-agent execution mode.
+* Identified the webhook requirements for M2: Pod injection, namespace bypass, conflict checking, exact opt-in matching.
+* Scaffolded `core/v1/Pod` MutatingWebhookConfiguration using Kubebuilder.
 
 ## Phase 5: Execution
-* **T-1**: Ran `kubebuilder create api`.
-* **T-2**: Implemented typed schema in `api/v1alpha1/telemetryprofile_types.go` including validation markers.
-* **T-3**: Implemented `internal/controller/config_render.go` to securely handle OTel configs, memory limits, and signal topologies.
-* **T-4**: Implemented `TelemetryProfileReconciler.Reconcile` to materialize ConfigMaps and test missing secrets.
-* **T-5**: Replaced the boilerplate test with a real integration test verifying Status and ConfigMap outputs.
+* **T-1**: Scaffolded webhook.
+* **T-2/T-3**: Implemented `PodDefaulter` in `internal/webhook/v1/pod_webhook.go` handling opt-in annotations, profile lookup via `client.Client`, configuration hashing, resource requests, and container conflicts.
+* **T-4**: Built envtest test suite in `internal/webhook/v1/pod_webhook_test.go` and configured `webhook_suite_test.go` to properly load `TelemetryProfile` via scheme definitions.
 
 ## Phase 6-7: Verification and Review
-* `make manifests` ran cleanly, generating the new CRDs.
-* `make test` successfully executed the `internal/controller` test suite in `envtest`.
+* `make test` executes tests under `internal/webhook/v1` ensuring sidecar injection works as designed.
 * Principal Review completed: Approved.
 
 ## Phase 8: Resolution
-* Zero findings to resolve.
+* Fixed scheme parsing errors for `k8sClient` during test initialization.
 
 ## Phase 9: Closeout
-* Generating final artifacts.
+* Generated artifacts and prepared for commit.

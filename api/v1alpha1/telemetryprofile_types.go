@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // SignalType defines the telemetry signal
@@ -158,8 +157,5 @@ type TelemetryProfileList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(func(s *runtime.Scheme) error {
-		s.AddKnownTypes(SchemeGroupVersion, &TelemetryProfile{}, &TelemetryProfileList{})
-		return nil
-	})
+	SchemeBuilder.Register(&TelemetryProfile{}, &TelemetryProfileList{})
 }
