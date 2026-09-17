@@ -1,0 +1,32 @@
+{
+  "tasks": {
+    "T-1": {
+      "status": "completed",
+      "evidence": "kubebuilder output."
+    },
+    "T-2": {
+      "status": "completed",
+      "evidence": "api/v1alpha1/telemetryprofile_types.go updated with validation markers."
+    },
+    "T-3": {
+      "status": "completed",
+      "evidence": "internal/controller/config_render.go written."
+    },
+    "T-4": {
+      "status": "completed",
+      "evidence": "internal/controller/telemetryprofile_controller.go updated."
+    },
+    "T-5": {
+      "status": "completed",
+      "evidence": "internal/controller/telemetryprofile_controller_test.go updated and passed envtest."
+    },
+    "T-6": {
+      "status": "completed",
+      "evidence": "Principal review approved."
+    },
+    "T-7": {
+      "status": "completed",
+      "evidence": "Artifacts generated."
+    }
+  }
+}

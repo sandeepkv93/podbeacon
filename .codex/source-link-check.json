@@ -1,0 +1,42 @@
+[
+  {
+    "url": "https://book.kubebuilder.io/reference/admission-webhook",
+    "status": 200,
+    "final_url": "https://book.kubebuilder.io/reference/admission-webhook"
+  },
+  {
+    "url": "https://kubernetes.io/docs/concepts/cluster-administration/admission-webhooks-good-practices/",
+    "status": 200,
+    "final_url": "https://kubernetes.io/docs/concepts/cluster-administration/admission-webhooks-good-practices/"
+  },
+  {
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/",
+    "status": 200,
+    "final_url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+  },
+  {
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/",
+    "status": 200,
+    "final_url": "https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/"
+  },
+  {
+    "url": "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/",
+    "status": 200,
+    "final_url": "https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/"
+  },
+  {
+    "url": "https://opentelemetry.io/docs/collector/configuration/",
+    "status": 200,
+    "final_url": "https://opentelemetry.io/docs/collector/configuration/"
+  },
+  {
+    "url": "https://opentelemetry.io/docs/platforms/kubernetes/operator/",
+    "status": 200,
+    "final_url": "https://opentelemetry.io/docs/platforms/kubernetes/operator/"
+  },
+  {
+    "url": "https://opentelemetry.io/docs/specs/otel/protocol/exporter/",
+    "status": 200,
+    "final_url": "https://opentelemetry.io/docs/specs/otel/protocol/exporter/"
+  }
+]

@@ -1,0 +1,292 @@
+# PodBeacon Requirements
+
+Status: implementation specification draft. No operator functionality is implemented yet.
+
+Project: `github.com/sandeepkv93/podbeacon`  
+Language: Go  
+Primary opt-in: Pod annotation `telemetry: "enable"`
+
+## 1. Purpose and success criteria
+
+PodBeacon shall provision and configure an OpenTelemetry Collector sidecar for opted-in Kubernetes Pods. Application teams should configure a telemetry destination once through a namespace profile, annotate their Pod templates, and send telemetry to a collector on localhost.
+
+The first release succeeds when an annotated Deployment and Job can send OTLP telemetry through exactly one injected collector, unannotated workloads are unchanged, and failure behavior is documented and tested. PodBeacon shall never claim that inserting a collector automatically instruments an application.
+
+This document defines future behavior. **MUST** and **SHALL** indicate release requirements; **SHOULD** indicates a recommendation whose omission needs a documented reason; **MAY** indicates optional behavior. IDs identify testable requirement groups. Numeric defaults are proposed product choices, not measured performance claims. Version and packaging decisions awaiting an implementation spike are listed in section 14.
+
+### Users
+
+| User | Need | Observable result |
+|---|---|---|
+| Application developer | Add telemetry forwarding without hand-maintaining a sidecar | A Pod-template annotation produces a configured collector |
+| Platform engineer | Control destinations, cost, and rollout | Namespace-scoped profiles and predictable failure behavior |
+| Cluster operator | Diagnose and safely remove the operator | Health signals, bounded admission requests, upgrade and uninstall instructions |
+
+### Scope
+
+The MVP includes a Go controller, a Pod mutating admission webhook, a namespaced `TelemetryProfile` CRD, generated collector configuration, Kubernetes deployment assets, tests, and an instrumented demo. It supports OTLP traces, metrics, and logs emitted by applications. Later sections specify acceptance criteria for each component.
+
+Non-goals for the MVP:
+
+- PostgreSQL provisioning, PR lifecycle integration, or any unrelated operator features.
+- Automatic SDK/agent injection, eBPF instrumentation, stdout/file log collection, Prometheus scraping, or automatic discovery of telemetry already emitted elsewhere.
+- Hosting a telemetry backend, a dashboard product, or a cluster-wide gateway/DaemonSet collector.
+- Changing existing Pod container lists in place, automatically restarting user workloads, or silently rewriting application environment variables.
+- Windows, static/mirror Pods, ephemeral-container injection, or support for Kubernetes without native sidecars.
+- Arbitrary user-provided collector YAML, cross-namespace profile/Secret references, arbitrary collector images, or exactly-once/durable delivery guarantees.
+
+## 2. Platform and architecture
+
+**PLAT-01 — Baseline.** The MVP shall target Linux Kubernetes 1.33 or later with native sidecar support. The release shall publish a finite tested version matrix rather than claiming support for every future release. Go currently has a repository baseline of 1.25.4; the implementation shall select compatible supported Go, Kubebuilder, controller-runtime, and Kubernetes library versions and pin them. No dependency installation is implied by this requirements document.
+
+**PLAT-02 — Operator structure.** Use Kubebuilder/controller-runtime as the proposed implementation path. Reconciliation shall validate `TelemetryProfile` resources and prepare configuration. A mutating webhook shall handle core/v1 Pod `CREATE` admission. Kubernetes admits Pods before their containers run; adding a sidecar to an existing Pod is not the reconciliation mechanism. See [Kubernetes Pod lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/) and [Kubebuilder admission webhooks](https://book.kubebuilder.io/reference/admission-webhook).
+
+**PLAT-03 — Native sidecar lifecycle.** Inject a restartable init container with `restartPolicy: Always`. Its startup probe shall gate application startup until the collector can accept local OTLP connections. Its failure after startup shall not be an application-readiness dependency. Jobs must reach completion after their application containers finish; the sidecar must not keep the Job alive indefinitely. Termination shall allow a bounded collector flush within the Pod's existing grace period without overwriting that period. Kubernetes lifecycle behavior is described in [Sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/).
+
+```text
+Platform engineer -> TelemetryProfile -> controller -> immutable configuration revision
+Developer -> annotated Pod template -> Pod CREATE -> mutating webhook -> admitted Pod
+                                                                         |
+                                                  application OTLP -> localhost collector
+                                                                         |
+                                                                   OTLP destination
+```
+
+The diagram describes the intended flow; successful admission alone does not establish successful telemetry delivery.
+
+## 3. Annotation and workload contract
+
+| ID | Requirement |
+|---|---|
+| INJ-01 | Only the exact, case-sensitive string `telemetry: "enable"` opts in. Absent, empty, `enabled`, `true`, `Enable`, and `disable` values shall produce no mutation. |
+| INJ-02 | Evaluate annotations on the Pod being admitted. Deployment/StatefulSet/DaemonSet/Job annotations belong under `spec.template.metadata.annotations`; CronJob annotations belong under `spec.jobTemplate.spec.template.metadata.annotations`. Parent-object metadata alone does not opt in. |
+| INJ-03 | Support Pods created directly and through Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs. Exclude operator and Kubernetes system namespaces through deployment-controlled namespace selection. Installation must make that exclusion explicit. |
+| INJ-04 | An optional `podbeacon.io/profile` annotation selects a profile in the Pod's own namespace. With no selection, use the profile named `default`. An empty/invalid selection is an error for an opted-in Pod. No implicit cross-namespace or cluster-wide fallback is allowed. |
+| INJ-05 | Inject exactly one container named `podbeacon-collector`, required configuration/credential volume mounts, resource settings, and operator-owned annotations. Preserve all unrelated Pod fields, container ordering, application env, labels, probes, volumes, service account, and security settings. |
+| INJ-06 | Use reserved annotations `podbeacon.io/injected`, `podbeacon.io/profile-uid`, and `podbeacon.io/config-hash` for provenance. Reserved names are not authorization evidence. A marker alone must not cause a skip: validate the full owned injection shape, selected profile UID, and revision. |
+| INJ-07 | Repeated webhook invocation shall be idempotent. A matching existing PodBeacon injection produces no duplicate patch. A mismatched marker, conflicting container/volume name, preexisting foreign collector, or incompatible mutation shall be rejected with an actionable admission message. MVP detects reserved-name conflicts and known OpenTelemetry sidecar-injection annotations; it cannot discover every custom collector process. |
+| INJ-08 | Reject opted-in `hostNetwork: true` Pods because the localhost assumption would cross Pod boundaries. Unsupported Windows Pods shall be rejected. This validation shall not affect unannotated Pods. |
+| INJ-09 | Adding/removing/changing annotations on a running Pod does not inject, remove, or reconfigure its sidecar. Users must update the workload template and explicitly roll out replacement Pods. PodBeacon shall never initiate that rollout automatically. |
+
+### Minimal workload example
+
+This is a proposed contract example, not an apply-ready deployment: the application image is a placeholder and must contain an instrumented application. Install PodBeacon and create a Ready `default` profile in the namespace first.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-app
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-app
+  template:
+    metadata:
+      labels:
+        app: example-app
+      annotations:
+        telemetry: "enable"
+    spec:
+      containers:
+        - name: app
+          image: YOUR_INSTRUMENTED_APP_IMAGE
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://127.0.0.1:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_SERVICE_NAME
+              value: example-app
+```
+
+The application must use an SDK/exporter that understands these settings. Signal-specific endpoint/protocol settings can override generic settings. PodBeacon does not overwrite either. HTTP/protobuf users should use `http://127.0.0.1:4318`; SDK-specific signal-path behavior must follow the [OTLP exporter specification](https://opentelemetry.io/docs/specs/otel/protocol/exporter/).
+
+## 4. TelemetryProfile API
+
+**API-01 — Resource.** Define namespaced `TelemetryProfile`, proposed API `telemetry.podbeacon.io/v1alpha1`, plural `telemetryprofiles`. A profile defines policy for new Pods within its namespace. No profile is created automatically with a guessed export destination.
+
+**API-02 — Typed schema.** The CRD shall validate required fields, enums, quantities, bounds, and unknown fields through structural schema and additional admission validation where needed. Reject invalid profiles rather than accepting arbitrary collector configuration. Defaults must be visible through the Kubernetes API and documented. The proposed MVP field contract is:
+
+| Field | Requirement/default |
+|---|---|
+| `spec.exporter.endpoint` | Required OTLP/gRPC `host:port`; no embedded credentials or URL scheme |
+| `spec.exporter.tls.insecure` | `false`; plaintext requires explicit `true` and is intended for local demos |
+| `spec.exporter.tls.caSecretRef` | Optional same-namespace Secret name/key for a custom CA; otherwise use collector system trust roots |
+| `spec.exporter.headersSecretRef` | Optional same-namespace Secret name whose keys map to outbound header names; values must never appear in generated ConfigMaps/status/logs |
+| `spec.signals` | Nonempty unique subset of `traces`, `metrics`, `logs`; default all three |
+| `spec.resources.requests` | Default CPU `50m`, memory `64Mi` |
+| `spec.resources.limits` | Default CPU `200m`, memory `128Mi`; requests must not exceed limits |
+| `spec.batch.timeout` | Default `5s`; bounded to `1s`–`30s` |
+| `spec.batch.sendBatchSize` | Default `512`; bounded to `1`–`8192` |
+| `spec.exporter.queueSize` | Default `256` batches; bounded to `1`–`4096` |
+| `spec.exporter.retryMaxElapsedTime` | Default `30s`; bounded to `1s`–`300s` |
+
+Credentials references support only the purposes above in the MVP. Header names must be validated for safe substitution into collector configuration; secrets containing malformed keys/values shall make the profile NotReady. Collector resource validation must reject memory limits too small for the supported pipeline; the exact minimum and memory-limiter settings must be fixed by the configuration spike before implementation of defaulting.
+
+**API-03 — Example profile.** This example uses plaintext for an in-cluster development destination and assumes that Service actually exists. Production profiles shall use TLS by default.
+
+```yaml
+apiVersion: telemetry.podbeacon.io/v1alpha1
+kind: TelemetryProfile
+metadata:
+  name: default
+  namespace: demo
+spec:
+  exporter:
+    endpoint: otel-gateway.observability.svc.cluster.local:4317
+    tls:
+      insecure: true
+  signals:
+    - traces
+    - metrics
+    - logs
+```
+
+**API-04 — Status.** Publish `status.observedGeneration`, `status.configHash`, `status.configMapName`, and standard conditions with type/status/reason/message/lastTransitionTime. At minimum support `Ready` and `Degraded`. `Ready=True` means current-generation configuration was validated and materialized, and referenced Secret objects/keys were checked; it does not promise external endpoint reachability or authentication success. Reasons shall distinguish `InvalidConfiguration`, `MissingSecret`, `ConfigurationPending`, and `Ready`. Do not publish credentials or full configuration in status.
+
+**API-05 — Reconciliation.** Profile/Secret changes shall enqueue bounded reconciliation. Repeated reconciliation of the same effective inputs shall cause no unnecessary writes. Use optimistic concurrency and retry with backoff. Failed current-generation updates shall set NotReady and block new injection under the default failure contract rather than silently selecting a previous revision. Existing Pods continue using their existing configuration.
+
+## 5. Configuration and data flow
+
+| ID | Requirement |
+|---|---|
+| CFG-01 | Generate deterministic, immutable ConfigMaps in the profile namespace, named using the profile UID and a hash of effective configuration inputs. Materialize configuration before advertising the profile Ready. Mount the selected revision read-only; admission must never create a ConfigMap or Secret. |
+| CFG-02 | Listen for application OTLP/gRPC at `127.0.0.1:4317` and OTLP/HTTP at `127.0.0.1:4318`, explicitly configured rather than relying on image defaults. Do not create a Service for each collector. Pod containers share a network namespace; port conflicts can still occur at runtime and must be diagnosable. |
+| CFG-03 | Enable pipelines only for selected signals, with memory limiter before batch processing and one OTLP/gRPC exporter. Validate the exact generated configuration using the pinned collector image. Configure bounded queueing/retries; queue saturation, process crash, and exhausted retry windows can lose telemetry. |
+| CFG-04 | Supply Pod name, namespace, UID, and node name through the Downward API for resource enrichment. Preserve an application's existing `service.name`. Disable collector features requiring Kubernetes API access for the MVP. |
+| CFG-05 | Mount referenced credentials only in the injected collector, read-only, and reference them through a mechanism supported by the pinned collector. Configuration rendering must not interpolate Secret values into ConfigMaps, Pod annotations, logs, status, or error messages. |
+| CFG-06 | Treat profile/image/default changes as configuration revisions for future Pods. Never live-reload or automatically roll existing Pods. Secret value rotation also requires explicit Pod replacement for a guaranteed update; document that mounted Secret updates alone do not guarantee collector reload. A referenced Secret disappearing can break replacement Pod startup and must surface in profile status. |
+| CFG-07 | Existing configuration revisions shall remain available across profile updates/deletion and operator restarts. For MVP, retain these ConfigMaps without profile owner references and provide an explicit administrator cleanup procedure after all referencing Pods are gone. No automated garbage collection or finalizer is required. Never delete user-owned Secrets. |
+| CFG-08 | Pin one tested collector distribution/image digest in each operator release. Profiles cannot override it. Keep the component set minimal and document why every included receiver/processor/exporter/extension is required. |
+| CFG-09 | Expose collector startup/liveness health through a dedicated health-check port reachable by kubelet HTTP probes, separate from loopback OTLP listeners. Do not tie health to exporter reachability. Readiness probes that couple application readiness to collector availability are excluded. Health endpoint exposure must be limited by documented network policy where supported. |
+
+The collector forwards only what applications emit. Logs mean OTLP log records sent to the receiver, not arbitrary container stdout. Backend loss or slowdown must not indefinitely block the application; SDK queueing/blocking behavior remains application-owned and must be explained in the demo.
+
+## 6. Admission reliability and failure policy
+
+**ADM-01 — Bounded and side-effect free.** Register only Pod CREATE mutation with AdmissionReview v1, `sideEffects: None`, `reinvocationPolicy: IfNeeded`, and a proposed `timeoutSeconds: 3`. Honor dry-run requests with an equivalent patch and no writes. Use informer/cache snapshots in the request path; do not call an exporter or perform configuration generation with external side effects. Return standard AdmissionReview responses and JSON Patch with the original request UID. Kubernetes defines these contracts in [Dynamic admission control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/).
+
+**ADM-02 — Default failure contract.** Default to `failurePolicy: Fail`: opted-in Pods must not silently run without required telemetry when admission is unavailable. This is an intentional product tradeoff favoring requested injection over annotated-workload availability; Kubernetes generally recommends fail-open mutators. Namespace exclusions and exact opt-in matching limit the outage impact. Scope webhook requests to exactly opted-in Pods through Kubernetes match conditions, and exclude system/operator namespaces before invocation. Unannotated Pods must still be creatable during webhook failure. A malformed or unsupported opted-in Pod is denied with a concise fix-oriented message.
+
+**ADM-03 — Optional fail-open installation.** Administrators MAY explicitly install `failurePolicy: Ignore`, accepting that webhook call errors/timeouts may admit an uninjected Pod. This does not override a deliberate validation denial. There shall be no claim that PodBeacon can annotate, log, or count skipped Pods when its webhook was never reached; troubleshooting must use Kubernetes admission metrics/audit evidence. Fail-open is not a compliance guarantee.
+
+**ADM-04 — Configuration readiness.** A missing profile, stale observed generation, missing configuration revision, invalid Secret reference, or unsynchronized cache shall yield a retryable/actionable denial for matched Pods. Within an informer propagation interval the cache may briefly serve a prior valid revision; document this eventual-consistency boundary. Once the latest generation is observed, do not silently use the old revision. Never block admission waiting for a profile to become Ready.
+
+**ADM-05 — Multi-replica service.** Production deployment shall support at least two webhook replicas with readiness-gated Service endpoints. Webhooks must serve on every ready replica; leader election applies to reconcilers, not webhook serving. Readiness requires valid serving certificates and synchronized caches. A startup/liveness check shall not depend on an OTLP destination being healthy.
+
+**ADM-06 — Certificates.** Supply webhook server certificates and the API-server CA bundle through a documented certificate lifecycle. The proposed default is cert-manager with a pinned tested compatibility matrix; final packaging is a section 14 decision. Test issuance, service DNS SANs, rotation, expiry, CA-bundle updates, and recovery. Certificate failure follows the configured failure policy; never disable certificate verification.
+
+## 7. Security and tenancy
+
+| ID | Requirement |
+|---|---|
+| SEC-01 | Cluster administrators install CRDs, webhook registration, namespace scope, and controller permissions. Namespace-authorized profile editors choose exporters and Secret references. Treat profile-edit rights as permission to route that namespace's telemetry; document this trust boundary. |
+| SEC-02 | PodBeacon is not a Secret authorization boundary: callers able to create Pods may already be able to mount namespace Secrets. No cross-namespace references. Restrict controller Secret access to watched namespaces as narrowly as deployment allows; explain that informer list/watch can expose Secret values even when code logs none. |
+| SEC-03 | Use least-privilege RBAC. Runtime needs profiles/status, generated ConfigMaps, referenced Secrets, Events, and leader-election Leases as required by actual implementation. It must not require Pod deletion, workload patching, exec, node writes, wildcard resources, or runtime write access to webhook registration. Installation permissions shall be separate. |
+| SEC-04 | Inject a non-root collector with read-only root filesystem, privilege escalation disabled, all capabilities dropped, and RuntimeDefault seccomp. Validate compatibility with restricted Pod Security. No host mounts, host ports, privileged mode, or additional service-account-token mounts. PodBeacon must not alter the application's existing token settings. |
+| SEC-05 | Outbound TLS shall verify hostname and trust chain by default. No skip-verification shortcut. Keep credentials out of metrics labels, admission diagnostics, events, examples, and Git. Automated tests must include secret redaction. |
+| SEC-06 | Provide network guidance for API-server-to-webhook traffic, kubelet probes, DNS, and destination egress. Pod containers share Pod-level network policy; do not promise independent sidecar egress isolation or arbitrary FQDN enforcement by standard NetworkPolicy. |
+| SEC-07 | Ship versioned, digest-pinned release images and manifests; scan dependencies/images, produce an SBOM, and document vulnerability handling before a release. These are future delivery requirements, not checks performed on this empty implementation. |
+
+## 8. Observability and operational behavior
+
+**OPS-01 — Operator telemetry.** Provide structured logs with request/reconcile correlation, namespace, profile, reason, and outcome without full Pod/config/Secret dumps. Expose bounded-cardinality counters for injection attempts/results, admission duration histograms, reconciliation failures, and profile readiness. Pod names/UIDs and request IDs belong in logs, not metric labels. Admission counts represent handler invocations, including retries/dry-run; they are not counts of running sidecars.
+
+**OPS-02 — Events and diagnostics.** Emit rate-limited Events for profile validation/materialization failures from reconciliation, not admission. Use admission response messages/warnings for rejected Pod requests. Troubleshooting documentation shall distinguish admission denial, image pull failure, pending volume/Secret mount, startup probe failure, OOM/restart, and exporter authentication/network/backpressure failures.
+
+**OPS-03 — Health and resource targets.** Provisional targets on a published benchmark environment: additional webhook processing latency p95 <=100 ms and p99 <=250 ms for 100 opted-in Pod CREATE requests/second over five minutes after warmup, with two ready replicas and cached profiles. Record object sizes, CPU/memory, cluster version, dry-run fraction, and observed error rate. These are release targets that must be measured, not guarantees implied by current code.
+
+**OPS-04 — Recovery.** Existing Pods shall not depend on operator availability to keep forwarding using already mounted config. A restart must converge without duplicate resources or corrupt status. Backend outages shall not make webhook/profile readiness fail merely because a destination is unreachable. Profile readiness verifies configuration, while collector signals reveal delivery health.
+
+**OPS-05 — Upgrade and uninstall.** Document upgrade compatibility for CRDs, pinned image changes, rollback to the prior operator/image, and explicit workload rollout to change sidecars. Uninstall sequence: prevent new injections/remove webhook registration, remove opt-in annotations from workload templates, explicitly replace workloads where sidecar removal is desired, verify remaining references, then remove operator/CRDs and only unused generated configuration. Deleting the operator alone does not remove existing sidecars. Retained ConfigMaps and user-owned Secrets require an inventory, not blanket deletion.
+
+## 9. Failure acceptance matrix
+
+| Scenario | Required outcome | Evidence |
+|---|---|---|
+| No exact enable annotation | No patch; no dependency on webhook availability | Admission unit tests and cluster outage test |
+| Profile missing/invalid/not yet current | Opted-in create denied with reason; existing Pods unaffected | Controller + admission integration |
+| Valid profile and repeated admission | Exactly one correct injection; subsequent patch empty | Idempotency tests |
+| Reserved name or known foreign injector conflict | Explicit denial, no partially mutated Pod | Negative admission tests |
+| Webhook unreachable, policy Fail | Matched creation fails within configured timeout; unmatched succeeds | Cluster fault test |
+| Webhook unreachable, policy Ignore | Matched creation may succeed uninjected; no fabricated marker | Cluster fault test |
+| Export destination down | Pod can start; bounded retries/queue; delivery errors visible | End-to-end outage/recovery |
+| Collector crashes after startup | Native sidecar restarts; application readiness is not explicitly gated by collector | End-to-end crash test |
+| Bad collector config or port collision | Collector startup fails visibly; no claim application is instrumented | Config validation and cluster negative test |
+| Profile updated/deleted | Old Pods unchanged; new Pods select current Ready revision or are denied | Lifecycle integration |
+| Secret rotated/deleted | Status reflects observed validity; explicit replacement needed for guaranteed credential refresh | Lifecycle integration |
+| Job completes | Job reaches Complete without waiting forever on sidecar | Real-cluster Job test |
+| Pod deleted mid-export | Shutdown bounded by existing grace period; possible data loss documented | Termination test |
+| Operator uninstalled | No dangling fail-closed webhook blocks Pod creation; active config not prematurely removed | Uninstall rehearsal |
+
+## 10. Testing and definition of done
+
+**TEST-01 — Unit tests.** Cover exact annotation values, template documentation, profile selection/defaults, malformed references, resource validation, deterministic hashing/rendering, idempotent JSON patches, provenance spoofing, conflicts, redaction, and all error paths. Assert unrelated Pod fields remain semantically identical and user objects are not mutated through shared cache pointers. Fuzz admission decoding/patch construction with bounded input sizes; no panic is acceptable.
+
+**TEST-02 — Integration tests.** Use envtest for CRD schema/defaulting, status/observedGeneration, reconciliation retries, immutable ConfigMap handling, profile/Secret transitions, ownership, and admission request/response behavior. Verify denied requests cause no admission side effects. envtest does not prove kubelet startup/shutdown or workload-controller behavior.
+
+**TEST-03 — End-to-end tests.** Use a real disposable cluster (for example kind) at the minimum supported version and each advertised release-matrix version. Install operator/certificates and an OTLP test receiver. Emit uniquely identifiable traces, metrics, and logs from an instrumented fixture; assert all three arrive with required resource attributes. Cover Deployment, direct Pod, StatefulSet, DaemonSet, Job, and CronJob-created Pods; verify Job/CronJob completion, dry-run, restrictive security settings, and failure matrix outcomes.
+
+**TEST-04 — Future CI gates.** Require formatting, `go vet ./...`, `go test -race ./...`, `go build ./...`, generated manifest/CRD drift checks, collector configuration validation, and the integration/E2E suites appropriate to the change. Pin tool versions. Introduce a linter only through an explicit implementation tooling decision. No coverage percentage substitutes for the failure matrix.
+
+**TEST-05 — Release evidence.** A release must include passing results for INJ, API, CFG, ADM, SEC, OPS, and PLAT requirements through TEST-01–04, measured OPS-03 results, a successful demo, version matrix, installation/upgrade/uninstall rehearsal, and no unresolved critical/high correctness or security findings. Record test environments and skipped cases. Any unmet SHALL blocks the MVP release or requires an explicit requirements revision.
+
+### Acceptance traceability
+
+| Requirement group | Primary proof |
+|---|---|
+| PLAT-01–03 | Version-matrix installation; native-sidecar startup, shutdown and Job tests |
+| INJ-01–09 | Mutation/negative/idempotency tests; all workload kinds; explicit rollout demo |
+| API-01–05 | CRD validation/defaulting; profile status and reconciliation lifecycle |
+| CFG-01–09 | Pinned-image config validation; mounted revisions/Secrets; three-signal export and recovery |
+| ADM-01–06 | Admission protocol/dry-run tests; outages, replica loss, cache readiness and certificate rotation |
+| SEC-01–07 | RBAC inspection/negative permissions; restricted Pod Security; TLS/redaction; release artifacts |
+| OPS-01–05 | Metrics/log assertions; latency benchmark; failure diagnostics; upgrade/uninstall rehearsal |
+| TEST-01–05 | CI evidence and release checklist with explicit gaps |
+
+## 11. Deliverables and implementation milestones
+
+Milestones are ordered dependencies, not dates or permission to implement in this documentation mission.
+
+1. **M0 — Prove platform assumptions.** Pin toolchain, collector and cluster matrix; validate restartable sidecar probes/shutdown, memory settings, Secret-backed headers, and certificate packaging. Exit: runnable spike evidence and decisions resolving section 14 blockers.
+2. **M1 — Profile controller.** Generate the CRD, typed validation/defaulting, status, deterministic config revisions and Secret checks. Exit: API/CFG integration tests pass without a webhook.
+3. **M2 — Injection webhook.** Implement exact opt-in, namespace exclusions, native sidecar patches, preserved fields, conflicts, dry-run, and idempotency. Exit: INJ/ADM unit and integration tests pass.
+4. **M3 — Cluster delivery.** Package manifests, RBAC, certificates, multi-replica deployment, demo app and OTLP receiver. Exit: all supported workload kinds and three-signal export pass in a disposable cluster.
+5. **M4 — Reliability and release.** Complete failure tests, performance measurements, image/dependency checks, version matrix, and runbooks. Exit: TEST-05 evidence complete.
+
+Expected implementation outputs include `cmd/`, typed API/controller/webhook packages, generated CRDs and install manifests, unit/integration/E2E tests, and docs for quickstart, architecture, profile reference, security, troubleshooting, upgrades and removal. Exact Go package layout remains an implementation decision.
+
+## 12. Relationship to upstream OpenTelemetry Operator
+
+The upstream OpenTelemetry Operator already supports collector sidecar injection and separate automatic instrumentation features. PodBeacon is an independent learning-focused implementation with the exact `telemetry: "enable"` opt-in and a deliberately constrained namespace profile API. It does not require or wrap the upstream operator and does not claim novel injection functionality. Avoid enabling both injectors on the same Pod; consult [OpenTelemetry Operator](https://opentelemetry.io/docs/platforms/kubernetes/operator/) for the upstream behavior.
+
+## 13. Technical reference sources
+
+These sources ground platform constraints; PodBeacon-specific defaults and APIs above are proposed design choices.
+
+- [Kubernetes Pod lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/) — Pod replacement and update constraints.
+- [Kubernetes sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/) — native restartable sidecars, probes, termination and Jobs.
+- [Kubernetes dynamic admission control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/) — matching, failure policies, reinvocation, timeouts and dry-run.
+- [Kubernetes admission webhook good practices](https://kubernetes.io/docs/concepts/cluster-administration/admission-webhooks-good-practices/) — idempotency, small scope, availability and latency.
+- [OpenTelemetry Collector configuration](https://opentelemetry.io/docs/collector/configuration/) — receivers, processors, exporters, pipelines and health extensions.
+- [OTLP exporter specification](https://opentelemetry.io/docs/specs/otel/protocol/exporter/) — endpoint/protocol settings and signal overrides.
+- [OpenTelemetry Operator](https://opentelemetry.io/docs/platforms/kubernetes/operator/) — existing sidecar and instrumentation capabilities.
+- [Kubebuilder admission webhooks](https://book.kubebuilder.io/reference/admission-webhook) — Go controller/webhook implementation context.
+
+## 14. Decisions to resolve before implementation milestones
+
+These do not block adopting this requirements draft. They block claiming an implementation-ready release configuration until M0 records a tested resolution.
+
+| Decision | Proposed direction | Required evidence/owner |
+|---|---|---|
+| Tested versions | Kubernetes >=1.33, finite release matrix; retain Go baseline unless tooling needs change | Implementer: compatible pinned Kubebuilder/controller-runtime/Go versions and cluster smoke tests |
+| Collector image and resource minimum | Digest-pinned distribution containing only required components | Implementer: config validation, 128Mi default-limit workload test, explicit minimum and memory-limiter settings |
+| Secret-to-header mechanism | Supported file/env configuration expansion using collector-only mounts | Implementer: actual collector export with secret headers, safe special-character handling and no leaks |
+| Certificate packaging | cert-manager as documented prerequisite | Implementer: compatibility pin, issuance/rotation/recovery test and install ordering |
+| API/annotation naming | `telemetry.podbeacon.io/v1alpha1`, `podbeacon.io/*` | Maintainer: confirm namespace/domain naming before first public API release; domain ownership is not asserted here |
+| Capacity targets | OPS-03 provisional latency/load targets | Implementer: reproducible benchmark and documented adjustment if measurements justify it |
+
+Future candidates after the MVP: optional SDK auto-instrumentation, HTTP export destinations, richer processors, policy-driven configuration rollouts, automatic safe revision garbage collection, additional operating systems, and integration with upstream operator resources. Each requires a separate design and acceptance criteria.

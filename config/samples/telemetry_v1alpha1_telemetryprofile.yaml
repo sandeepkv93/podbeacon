@@ -1,0 +1,9 @@
+apiVersion: telemetry.podbeacon.io/v1alpha1
+kind: TelemetryProfile
+metadata:
+  labels:
+    app.kubernetes.io/name: podbeacon
+    app.kubernetes.io/managed-by: kustomize
+  name: telemetryprofile-sample
+spec:
+  # TODO(user): Add fields here

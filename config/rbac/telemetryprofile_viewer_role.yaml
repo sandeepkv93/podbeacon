@@ -1,0 +1,29 @@
+# This rule is not used by the project podbeacon itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to telemetry.podbeacon.io resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: podbeacon
+    app.kubernetes.io/managed-by: kustomize
+  name: telemetryprofile-viewer-role
+rules:
+- apiGroups:
+  - telemetry.podbeacon.io
+  resources:
+  - telemetryprofiles
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - telemetry.podbeacon.io
+  resources:
+  - telemetryprofiles/status
+  verbs:
+  - get
