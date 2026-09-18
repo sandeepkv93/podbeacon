@@ -2,11 +2,11 @@
   "tasks": {
     "T-1": {
       "status": "completed",
-      "evidence": "Verified RBAC."
+      "evidence": "e2e_test.go injected."
     },
     "T-2": {
       "status": "completed",
-      "evidence": "Verified Kustomize pipeline."
+      "evidence": "GitHub Actions validated."
     },
     "T-3": {
       "status": "completed",

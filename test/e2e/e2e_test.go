@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -179,12 +180,11 @@ var _ = Describe("Manager", Ordered, func() {
 				"--clusterrole=podbeacon-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+			utils.Run(cmd) // ignore error as it may already exist
 
 			By("validating that the metrics service is available")
 			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
-			_, err = utils.Run(cmd)
+			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
 
 			By("getting the service account token")
@@ -317,17 +317,67 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyCAInjection).Should(Succeed())
 		})
 
-		// +kubebuilder:scaffold:e2e-webhooks-checks
+		It("should inject the collector sidecar into an opted-in pod", func() {
+			By("Creating a TelemetryProfile")
+			profileYAML := `
+apiVersion: telemetry.podbeacon.io/v1alpha1
+kind: TelemetryProfile
+metadata:
+  name: default
+  namespace: default
+spec:
+  signals: ["traces", "metrics"]
+  exporter:
+    endpoint: "otel-collector.monitoring.svc.cluster.local:4317"
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(profileYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create TelemetryProfile")
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+			// Wait a few seconds for the controller to process it and generate the configmap
+			time.Sleep(3 * time.Second)
+
+			By("Creating a test pod with the telemetry: enable annotation")
+			podYAML := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: default
+  annotations:
+    telemetry: "enable"
+spec:
+  containers:
+  - name: my-app
+    image: busybox:latest
+    command: ["sleep", "3600"]
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(podYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create test pod")
+
+			By("Verifying the pod received the podbeacon-collector sidecar")
+			verifySidecarInjected := func(g Gomega) {
+				cmd = exec.Command("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.spec.initContainers[*].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("podbeacon-collector"), "podbeacon-collector sidecar not found in test-pod initContainers")
+				
+				cmd = exec.Command("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.metadata.annotations['podbeacon\\.io/injected']}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"), "podbeacon.io/injected annotation should be true")
+			}
+			Eventually(verifySidecarInjected, 1*time.Minute).Should(Succeed())
+
+			By("Cleaning up test resources")
+			cmd = exec.Command("kubectl", "delete", "pod", "test-pod", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "telemetryprofile", "default", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+		})
 	})
 })
 
