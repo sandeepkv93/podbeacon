@@ -1,7 +1,11 @@
-# Principal Review - M4.2
+# Principal Review - M5 Sage Remediation
 
 **Decision:** APPROVED
 
-All T-1, T-2, T-3, T-4, and T-5 tasks were executed successfully. The Subagent correctly identified missing OTel `health_check` extensions, deprecated `queueSize`/`retryMaxElapsedTime` configuration fields, and missing `SecurityContext` requirements for the `restricted` PSS, resolving them with precise patches to `config_render.go` and `pod_webhook.go`.
+All 15 findings (Critical, Major, and Minor) from the Sage Review have been comprehensively resolved by the distributed Subagent team.
 
-The e2e suite is entirely green, asserting workloads run reliably and securely across all defined tests.
+- **Webhook Hardening:** The mutating webhook now strictly defines scope via `namespaceSelector` and `objectSelector` constraints. Spoofed markers are identified, and the sidecar structure is heavily validated and enriched (Downward API, Liveness Probes).
+- **Controller Hardening:** The config Hash now correctly incorporates limits, digests, and references. Status transitions natively surface materialization conflicts via `ConfigurationConflict` or `ConfigurationPending`.
+- **E2E & Structural Schema:** The CRD is natively restricted via CEL schemas. The `Makefile` successfully guarantees context isolation.
+
+The code integrates perfectly.

@@ -68,6 +68,8 @@ type ExporterSpec struct {
 	// RetryMaxElapsedTime is the maximum time spent retrying a batch. Default 30s.
 	// +optional
 	// +kubebuilder:default="30s"
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
 	RetryMaxElapsedTime *metav1.Duration `json:"retryMaxElapsedTime,omitempty"`
 }
 
@@ -76,6 +78,8 @@ type BatchSpec struct {
 	// Timeout is the time to wait before flushing a batch. Default 5s.
 	// +optional
 	// +kubebuilder:default="5s"
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
 	// SendBatchSize is the number of spans/metrics/logs to batch. Default 512.
@@ -97,10 +101,12 @@ type TelemetryProfileSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=3
 	// +listType=set
+	// +kubebuilder:default={traces,metrics}
 	Signals []SignalType `json:"signals,omitempty"`
 
 	// Resources configures the collector sidecar resources
 	// +optional
+	// +kubebuilder:default={limits: {cpu: "100m", memory: "128Mi"}, requests: {cpu: "10m", memory: "64Mi"}}
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// Batch configures the batch processor

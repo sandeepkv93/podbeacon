@@ -27,9 +27,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	telemetryv1alpha1 "github.com/sandeepkv93/podbeacon/api/v1alpha1"
@@ -108,26 +111,33 @@ func (r *TelemetryProfileReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cmName,
 			Namespace: req.Namespace,
-			// Per CFG-07: retain ConfigMaps without profile owner references for MVP.
-			// No owner reference is set here.
+			Labels: map[string]string{
+				"podbeacon.io/profile":     profile.Name,
+				"podbeacon.io/config-hash": hash,
+			},
+		},
+		Immutable: ptr.To(true),
+		Data: map[string]string{
+			"relay.yaml": configStr,
 		},
 	}
 
-	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
-		if cm.Data == nil {
-			cm.Data = make(map[string]string)
-		}
-		cm.Data["relay.yaml"] = configStr
-		return nil
-	})
-
+	err = r.Create(ctx, cm)
 	if err != nil {
-		log.Error(err, "Failed to create/update ConfigMap", "ConfigMap.Name", cmName)
-		return ctrl.Result{}, err
-	}
-
-	if op != controllerutil.OperationResultNone {
-		log.Info("ConfigMap materialized", "ConfigMap.Name", cmName, "Operation", op)
+		if apierrors.IsAlreadyExists(err) {
+			// Verify it matches
+			existing := &corev1.ConfigMap{}
+			if err := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: req.Namespace}, existing); err != nil {
+				return r.updateStatus(ctx, profile, false, "ConfigurationPending", "Failed to retrieve existing ConfigMap")
+			}
+			if existing.Data["relay.yaml"] != configStr {
+				return r.updateStatus(ctx, profile, false, "ConfigurationConflict", "Existing ConfigMap data mismatch")
+			}
+		} else {
+			return r.updateStatus(ctx, profile, false, "ConfigurationPending", "Failed to create ConfigMap: "+err.Error())
+		}
+	} else {
+		log.Info("ConfigMap materialized", "ConfigMap.Name", cmName)
 	}
 
 	// Update Status to Ready
@@ -152,17 +162,21 @@ func (r *TelemetryProfileReconciler) updateStatus(ctx context.Context, profile *
 		ObservedGeneration: profile.Generation,
 	}
 
-	meta.SetStatusCondition(&profile.Status.Conditions, condition)
+	// Check if condition actually changed
+	existing := meta.FindStatusCondition(profile.Status.Conditions, "Ready")
+	changed := existing == nil || existing.Status != status || existing.Reason != reason || existing.Message != message || existing.ObservedGeneration != profile.Generation
 
-	err := r.Status().Update(ctx, profile)
-	if err != nil {
-		// Requeue on conflict
-		return ctrl.Result{RequeueAfter: time.Second}, err
+	if changed {
+		meta.SetStatusCondition(&profile.Status.Conditions, condition)
+		err := r.Status().Update(ctx, profile)
+		if err != nil {
+			return ctrl.Result{RequeueAfter: time.Second}, err
+		}
 	}
 
-	// If missing secret, requeue to check again
-	if reason == "MissingSecret" {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	if !isReady && reason != "MissingSecret" && reason != "InvalidConfiguration" {
+		// Return error for backoff on materialization failure, etc.
+		return ctrl.Result{}, fmt.Errorf("reconciliation failed: %s", message)
 	}
 
 	return ctrl.Result{}, nil
@@ -170,8 +184,40 @@ func (r *TelemetryProfileReconciler) updateStatus(ctx context.Context, profile *
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TelemetryProfileReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Map Secret to profiles
+	mapSecretToProfile := func(ctx context.Context, obj client.Object) []reconcile.Request {
+		secret := obj.(*corev1.Secret)
+		var profiles telemetryv1alpha1.TelemetryProfileList
+		if err := r.List(ctx, &profiles, client.InNamespace(secret.Namespace)); err != nil {
+			return nil
+		}
+		var reqs []reconcile.Request
+		for _, p := range profiles.Items {
+			if (p.Spec.Exporter.HeadersSecretRef != nil && p.Spec.Exporter.HeadersSecretRef.Name == secret.Name) ||
+				(p.Spec.Exporter.TLS != nil && p.Spec.Exporter.TLS.CASecretRef != nil && p.Spec.Exporter.TLS.CASecretRef.Name == secret.Name) {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: p.Name, Namespace: p.Namespace},
+				})
+			}
+		}
+		return reqs
+	}
+
+	// Map ConfigMap to profiles
+	mapCMToProfile := func(ctx context.Context, obj client.Object) []reconcile.Request {
+		cm := obj.(*corev1.ConfigMap)
+		if profileName, ok := cm.Labels["podbeacon.io/profile"]; ok {
+			return []reconcile.Request{
+				{NamespacedName: types.NamespacedName{Name: profileName, Namespace: cm.Namespace}},
+			}
+		}
+		return nil
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&telemetryv1alpha1.TelemetryProfile{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(mapSecretToProfile)).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(mapCMToProfile)).
 		Named("telemetryprofile").
 		Complete(r)
 }

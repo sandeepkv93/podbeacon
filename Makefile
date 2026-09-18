@@ -70,6 +70,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= podbeacon-test-e2e
+export KUBECONFIG ?= $(shell pwd)/bin/kubeconfig-e2e
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -77,13 +78,15 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 		echo "Kind is not installed. Please install Kind manually."; \
 		exit 1; \
 	}
+	@mkdir -p $(shell pwd)/bin
 	@case "$$($(KIND) get clusters)" in \
 		*"$(KIND_CLUSTER)"*) \
 			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
 		*) \
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) --image kindest/node:v1.31.0 ;; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) --image kindest/node:v1.33.0 --kubeconfig $(KUBECONFIG) && touch $(shell pwd)/bin/.kind_cluster_created ;; \
 	esac
+	@$(KIND) export kubeconfig --name $(KIND_CLUSTER) --kubeconfig $(KUBECONFIG)
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
@@ -92,7 +95,10 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+	@if [ -f $(shell pwd)/bin/.kind_cluster_created ]; then \
+		$(KIND) delete cluster --name $(KIND_CLUSTER) --kubeconfig $(KUBECONFIG) || true; \
+		rm -f $(shell pwd)/bin/.kind_cluster_created $(KUBECONFIG); \
+	fi
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

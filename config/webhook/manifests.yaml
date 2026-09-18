@@ -13,6 +13,16 @@ webhooks:
       path: /mutate--v1-pod
   failurePolicy: Fail
   name: mpod.telemetry.podbeacon.io
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: NotIn
+      values:
+      - kube-system
+      - podbeacon-system
+  objectSelector:
+    matchLabels:
+      telemetry: enable
   reinvocationPolicy: IfNeeded
   rules:
   - apiGroups:
@@ -24,3 +34,4 @@ webhooks:
     resources:
     - pods
   sideEffects: None
+  timeoutSeconds: 5

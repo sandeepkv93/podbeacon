@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -12,6 +13,8 @@ import (
 
 	telemetryv1alpha1 "github.com/sandeepkv93/podbeacon/api/v1alpha1"
 )
+
+const CollectorImage = "otel/opentelemetry-collector:0.120.0"
 
 // OTelConfig represents the structure of the collector config
 type OTelConfig struct {
@@ -82,7 +85,8 @@ type RetryOnFailure struct {
 }
 
 type TLSConfig struct {
-	Insecure bool `yaml:"insecure"`
+	Insecure bool   `yaml:"insecure"`
+	CAFile   string `yaml:"ca_file,omitempty"`
 }
 
 type Service struct {
@@ -96,8 +100,42 @@ type Pipeline struct {
 	Exporters  []string `yaml:"exporters"`
 }
 
+// EffectiveRevision represents the canonical input for identity hashing
+type EffectiveRevision struct {
+	ConfigString  string
+	Image         string
+	Resources     corev1.ResourceRequirements
+	HeadersSecret string
+	HeaderKeys    []string
+	CASecret      string
+	CAKey         string
+}
+
+func mapSecretKeyToEnvVar(key string) string {
+	var sb strings.Builder
+	for i, r := range key {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('_')
+		}
+	}
+	return "PB_HEADER_" + strings.ToUpper(sb.String())
+}
+
 // GenerateConfig computes the deterministic ConfigMap content and its hash
 func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []string) (string, string, error) {
+	rev := EffectiveRevision{
+		Image:      CollectorImage,
+		HeaderKeys: headerKeys,
+	}
+	if profile.Spec.Resources.Requests != nil || profile.Spec.Resources.Limits != nil {
+		rev.Resources = corev1.ResourceRequirements{
+			Requests: profile.Spec.Resources.Requests,
+			Limits:   profile.Spec.Resources.Limits,
+		}
+	}
+
 	// Process memory limits
 	memLimit := resource.MustParse("128Mi")
 	if profile.Spec.Resources.Limits != nil {
@@ -134,6 +172,15 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 		retryMax = profile.Spec.Exporter.RetryMaxElapsedTime.Duration.String()
 	}
 
+	tlsConfig := TLSConfig{
+		Insecure: profile.Spec.Exporter.TLS != nil && profile.Spec.Exporter.TLS.Insecure,
+	}
+	if profile.Spec.Exporter.TLS != nil && profile.Spec.Exporter.TLS.CASecretRef != nil {
+		tlsConfig.CAFile = "/certs/ca.crt"
+		rev.CASecret = profile.Spec.Exporter.TLS.CASecretRef.Name
+		rev.CAKey = profile.Spec.Exporter.TLS.CASecretRef.Key
+	}
+
 	cfg := OTelConfig{
 		Receivers: Receivers{
 			OTLP: OTLPReceiver{
@@ -162,9 +209,7 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 		Exporters: Exporters{
 			OTLP: OTLPExporter{
 				Endpoint: profile.Spec.Exporter.Endpoint,
-				TLS: TLSConfig{
-					Insecure: profile.Spec.Exporter.TLS != nil && profile.Spec.Exporter.TLS.Insecure,
-				},
+				TLS:      tlsConfig,
 				SendingQueue: SendingQueue{
 					Enabled:   true,
 					QueueSize: queueSize,
@@ -184,9 +229,16 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 
 	// Add headers from secret keys
 	if profile.Spec.Exporter.HeadersSecretRef != nil && len(headerKeys) > 0 {
+		rev.HeadersSecret = profile.Spec.Exporter.HeadersSecretRef.Name
 		slices.Sort(headerKeys)
+		envMap := make(map[string]string)
 		for _, k := range headerKeys {
-			cfg.Exporters.OTLP.Headers[k] = fmt.Sprintf("${env:%s}", k)
+			envKey := mapSecretKeyToEnvVar(k)
+			if orig, ok := envMap[envKey]; ok {
+				return "", "", fmt.Errorf("header key collision: %q and %q map to the same env var %q", orig, k, envKey)
+			}
+			envMap[envKey] = k
+			cfg.Exporters.OTLP.Headers[k] = fmt.Sprintf("${env:%s}", envKey)
 		}
 	}
 
@@ -220,10 +272,15 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 		return "", "", err
 	}
 	configStr := string(b)
+	rev.ConfigString = configStr
 
-	// Compute hash of the config content + profile generation
+	// Compute hash of the canonical effective revision
+	revBytes, err := yaml.Marshal(rev)
+	if err != nil {
+		return "", "", err
+	}
 	h := sha256.New()
-	h.Write(b)
+	h.Write(revBytes)
 	hash := hex.EncodeToString(h.Sum(nil))[:16]
 
 	return configStr, hash, nil

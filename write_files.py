@@ -1,4 +1,6 @@
-/*
+import os
+
+webhook_content = """/*
 Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -312,7 +314,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 		if obj.Annotations[AnnotationConfigHash] != profile.Status.ConfigHash {
 			return fmt.Errorf("injected config hash mismatch")
 		}
-
+		
 		foundContainer := false
 		for _, c := range obj.Spec.InitContainers {
 			if c.Name == CollectorContainerName {
@@ -365,3 +367,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 
 	return nil
 }
+"""
+
+with open("internal/webhook/v1/pod_webhook.go", "w") as f:
+    f.write(webhook_content)

@@ -6,4 +6,17 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: telemetryprofile-sample
 spec:
-  # TODO(user): Add fields here
+  exporter:
+    endpoint: "otel-collector.monitoring.svc.cluster.local:4317"
+    tls:
+      insecure: true
+  signals:
+  - traces
+  - metrics
+  resources:
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+    requests:
+      cpu: "50m"
+      memory: "64Mi"

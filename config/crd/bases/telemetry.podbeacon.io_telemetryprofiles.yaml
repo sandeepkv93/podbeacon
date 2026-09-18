@@ -63,6 +63,7 @@ spec:
                     default: 5s
                     description: Timeout is the time to wait before flushing a batch.
                       Default 5s.
+                    format: duration
                     type: string
                 type: object
               exporter:
@@ -100,6 +101,7 @@ spec:
                     default: 30s
                     description: RetryMaxElapsedTime is the maximum time spent retrying
                       a batch. Default 30s.
+                    format: duration
                     type: string
                   tls:
                     description: TLS configuration for the exporter
@@ -138,6 +140,13 @@ spec:
                 - endpoint
                 type: object
               resources:
+                default:
+                  limits:
+                    cpu: 100m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
                 description: Resources configures the collector sidecar resources
                 properties:
                   claims:
@@ -197,6 +206,9 @@ spec:
                     type: object
                 type: object
               signals:
+                default:
+                - traces
+                - metrics
                 description: Signals is a unique subset of traces, metrics, logs
                 items:
                   description: SignalType defines the telemetry signal
