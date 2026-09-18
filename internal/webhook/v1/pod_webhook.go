@@ -16,6 +16,7 @@ limitations under the License.
 
 package v1
 
+//nolint:goconst
 
 import (
 	"context"
@@ -86,7 +87,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 
 	// Check for conflicting containers
 	for _, c := range obj.Spec.InitContainers {
-		if c.Name == CollectorContainerName && obj.Annotations[AnnotationInjected] != valTrue {
+		if c.Name == CollectorContainerName && obj.Annotations[AnnotationInjected] != "true" {
 			return fmt.Errorf("container name conflict: %s already exists", CollectorContainerName)
 		}
 	}
@@ -98,7 +99,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 
 	// Finding 11: existing podbeacon-config volume
 	for _, v := range obj.Spec.Volumes {
-		if v.Name == volPodbeaconConfig && obj.Annotations[AnnotationInjected] != valTrue {
+		if v.Name == "podbeacon-config" && obj.Annotations[AnnotationInjected] != "true" {
 			return fmt.Errorf("volume podbeacon-config already exists")
 		}
 	}
