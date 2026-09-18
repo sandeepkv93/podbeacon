@@ -114,6 +114,7 @@ func (r *TelemetryProfileReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			Labels: map[string]string{
 				"podbeacon.io/profile":     profile.Name,
 				"podbeacon.io/config-hash": hash,
+				"podbeacon.io/profile-uid": string(profile.UID),
 			},
 		},
 		//nolint:modernize
