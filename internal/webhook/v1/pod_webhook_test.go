@@ -166,7 +166,7 @@ var _ = Describe("Pod Webhook", func() {
 				},
 			}
 			err := defaulter.Default(ctx, pod)
-			Expect(err).To(MatchError("Windows pods are not supported"))
+			Expect(err).To(MatchError("windows pods are not supported"))
 		})
 
 		It("should fail if foreign OTel annotation present", func() {
