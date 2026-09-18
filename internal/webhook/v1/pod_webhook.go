@@ -21,7 +21,6 @@ package v1
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -345,7 +344,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 		foundVolume := false
 		for _, v := range obj.Spec.Volumes {
 			if v.Name == expectedVolume.Name {
-				if !reflect.DeepEqual(v.VolumeSource, expectedVolume.VolumeSource) {
+				if v.VolumeSource.ConfigMap == nil || v.VolumeSource.ConfigMap.Name != expectedVolume.VolumeSource.ConfigMap.Name {
 					return fmt.Errorf("injected volume mismatch")
 				}
 				foundVolume = true
