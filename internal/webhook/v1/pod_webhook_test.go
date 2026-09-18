@@ -28,6 +28,8 @@ import (
 	telemetryv1alpha1 "github.com/sandeepkv93/podbeacon/api/v1alpha1"
 )
 
+const defaultNamespace = "default"
+
 var _ = Describe("Pod Webhook", func() {
 	Context("When defaulting a Pod", func() {
 		ctx := context.Background()
@@ -39,8 +41,8 @@ var _ = Describe("Pod Webhook", func() {
 			// Create a ready TelemetryProfile
 			profile := &telemetryv1alpha1.TelemetryProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "default",
-					Namespace: "default",
+					Name:      defaultNamespace,
+					Namespace: defaultNamespace,
 				},
 				Spec: telemetryv1alpha1.TelemetryProfileSpec{
 					Exporter: telemetryv1alpha1.ExporterSpec{
@@ -51,7 +53,7 @@ var _ = Describe("Pod Webhook", func() {
 			err := k8sClient.Create(ctx, profile)
 			if err != nil {
 				// if it already exists, just get it
-				err = k8sClient.Get(ctx, types.NamespacedName{Name: "default", Namespace: "default"}, profile)
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: defaultNamespace, Namespace: defaultNamespace}, profile)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
@@ -75,7 +77,7 @@ var _ = Describe("Pod Webhook", func() {
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
-					Namespace: "default",
+					Namespace: defaultNamespace,
 					Annotations: map[string]string{
 						"telemetry": "enable",
 					},
@@ -104,7 +106,7 @@ var _ = Describe("Pod Webhook", func() {
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod-no-opt-in",
-					Namespace: "default",
+					Namespace: defaultNamespace,
 				},
 			}
 			err := defaulter.Default(ctx, pod)

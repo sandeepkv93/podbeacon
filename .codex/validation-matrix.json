@@ -1,20 +1,47 @@
 {
-  "tasks": {
-    "T-1": {
-      "status": "completed",
-      "evidence": "e2e_test.go injected."
+  "mission": "M4.2",
+  "tasks": [
+    {
+      "id": "T-1",
+      "description": "E2E Signal Verification",
+      "status": "PASS",
+      "evidence": "make test-e2e executes Otel receiver tests."
     },
-    "T-2": {
-      "status": "completed",
-      "evidence": "GitHub Actions validated."
+    {
+      "id": "T-2",
+      "description": "E2E Workload & Job Completion Tests",
+      "status": "PASS",
+      "evidence": "make test-e2e executes Job completeness verification."
     },
-    "T-3": {
-      "status": "completed",
-      "evidence": "Principal review approved."
+    {
+      "id": "T-3",
+      "description": "Failure Matrix & Security Tests",
+      "status": "PASS",
+      "evidence": "make test-e2e executes restricted PSS namespace tests."
     },
-    "T-4": {
-      "status": "completed",
-      "evidence": "Artifacts generated."
+    {
+      "id": "T-4",
+      "description": "Performance & Latency Benchmarks",
+      "status": "PASS",
+      "evidence": "docs/BENCHMARKS.md published."
+    },
+    {
+      "id": "T-5",
+      "description": "Documentation & Runbooks",
+      "status": "PASS",
+      "evidence": "docs/ folder and README.md published."
     }
-  }
+  ],
+  "gates": [
+    {
+      "gate": "Phase 6: Final Verification",
+      "status": "PASS",
+      "evidence": "make test-e2e 8/8 passed."
+    },
+    {
+      "gate": "Phase 7: Principal Review",
+      "status": "PASS",
+      "evidence": "principal-review.json APPROVED."
+    }
+  ]
 }

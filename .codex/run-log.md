@@ -1,16 +1,9 @@
-# Mission Run Log - M4
+# Run Log - M4.2
 
-## Phase 0-4: Planning
-* Investigated `test/e2e/e2e_test.go` and `.github/workflows/test-e2e.yml`.
-* Configured `Makefile` to use `kindest/node:v1.31.0` to support modern cert-manager deployments with `selectableFields`.
-
-## Phase 5: Execution
-* **T-1**: Wrote `should inject the collector sidecar into an opted-in pod` test block executing `kubectl apply` for `TelemetryProfile` and an opted-in `Pod`, asserting injection behavior natively.
-* **T-2**: Evaluated the GitHub Actions `test-e2e.yml` payload, which correctly executes `make test-e2e`.
-
-## Phase 6-7: Verification and Review
-* `make test-e2e` uncovered a webhook configuration path mismatch (`/mutate--v1-pod` vs `/mutate-core-v1-pod`). The `kubebuilder` annotation was patched in `pod_webhook.go` and `make manifests` was rerun.
-* Principal Review completed: Approved.
-
-## Phase 8: Resolution
-* Wait for final verification of `make test-e2e` inside the active `podbeacon-test-e2e` cluster.
+- **T-1**: Subagent added OTel receiver and Mock emitter to e2e test. Fixed 127.0.0.1 binding and TLS insecure configuration.
+- **T-2**: Subagent added Job workload injection tests. Fixed controller-runtime extensions formatting and OTel pipeline deprecated configuration blocks.
+- **T-3**: Subagent added Restricted PSS tests. Webhook now dynamically injects a strictly locked down SecurityContext for the sidecar container to satisfy PSS standards.
+- **T-4**: Generated `docs/BENCHMARKS.md` describing webhook latency under 100 Pods/sec.
+- **T-5**: Authored QUICKSTART, ARCHITECTURE, PROFILE_REFERENCE, SECURITY, and RUNBOOKS documentation.
+- **T-6**: Principal Review conducted and approved.
+- **T-7**: Closeout artifacts generated.

@@ -329,6 +329,8 @@ spec:
   signals: ["traces", "metrics"]
   exporter:
     endpoint: "otel-collector.monitoring.svc.cluster.local:4317"
+    tls:
+      insecure: true
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = bytes.NewBufferString(profileYAML)
@@ -376,6 +378,351 @@ spec:
 			cmd = exec.Command("kubectl", "delete", "pod", "test-pod", "-n", "default", "--ignore-not-found")
 			utils.Run(cmd)
 			cmd = exec.Command("kubectl", "delete", "telemetryprofile", "default", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+		})
+		It("should verify end-to-end signal delivery to OTLP receiver (T-1)", func() {
+			By("Deploying a mock OTLP receiver")
+			receiverYAML := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: otel-receiver
+  namespace: default
+  labels:
+    app: otel-receiver
+spec:
+  containers:
+  - name: otel-collector
+    image: otel/opentelemetry-collector:latest
+    command: ["/otelcol", "--config=/etc/otelcol/config.yaml"]
+    ports:
+    - containerPort: 4317
+    volumeMounts:
+    - name: config-volume
+      mountPath: /etc/otelcol
+  volumes:
+  - name: config-volume
+    configMap:
+      name: otel-receiver-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-receiver-config
+  namespace: default
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+              endpoint: 0.0.0.0:4317
+    exporters:
+      debug:
+        verbosity: detailed
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          exporters: [debug]
+        logs:
+          receivers: [otlp]
+          exporters: [debug]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-receiver
+  namespace: default
+spec:
+  selector:
+    app: otel-receiver
+  ports:
+  - port: 4317
+    targetPort: 4317
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(receiverYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to deploy mock OTLP receiver")
+
+			By("Waiting for receiver to be ready")
+			verifyReceiverReady := func(g Gomega) {
+				cmd = exec.Command("kubectl", "get", "pod", "otel-receiver", "-n", "default", "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}
+			Eventually(verifyReceiverReady, 2*time.Minute).Should(Succeed())
+
+			By("Creating a TelemetryProfile for the mock receiver")
+			profileYAML := `
+apiVersion: telemetry.podbeacon.io/v1alpha1
+kind: TelemetryProfile
+metadata:
+  name: signal-test
+  namespace: default
+spec:
+  signals: ["traces", "metrics", "logs"]
+  exporter:
+    endpoint: "otel-receiver.default.svc.cluster.local:4317"
+    tls:
+      insecure: true
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(profileYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create TelemetryProfile")
+
+			// Wait for profile processing
+			time.Sleep(3 * time.Second)
+
+			By("Deploying a mock telemetry emitter pod")
+			emitterYAML := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mock-emitter
+  namespace: default
+  annotations:
+    telemetry: "enable"
+    podbeacon.io/profile: "signal-test"
+spec:
+  containers:
+  - name: emitter
+    image: ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:latest
+    args:
+    - traces
+    - --otlp-endpoint=localhost:4317
+    - --otlp-insecure
+    - --rate=10
+    - --duration=10s
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(emitterYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create mock emitter pod")
+
+			By("Verifying signal reception in the receiver logs")
+			verifySignalsReceived := func(g Gomega) {
+				cmd = exec.Command("kubectl", "logs", "otel-receiver", "-n", "default")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("ResourceSpans"))
+			}
+			Eventually(verifySignalsReceived, 2*time.Minute).Should(Succeed())
+
+			By("Cleaning up T-1 resources")
+			cmd = exec.Command("kubectl", "delete", "pod", "mock-emitter", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "telemetryprofile", "signal-test", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pod", "otel-receiver", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "service", "otel-receiver", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "configmap", "otel-receiver-config", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+		})
+
+		It("should inject sidecar into various workload types and Job should complete (T-2)", func() {
+			By("Creating a TelemetryProfile")
+			profileYAML := `
+apiVersion: telemetry.podbeacon.io/v1alpha1
+kind: TelemetryProfile
+metadata:
+  name: workload-test
+  namespace: default
+spec:
+  signals: ["traces"]
+  exporter:
+    endpoint: "otel-collector.monitoring.svc.cluster.local:4317"
+    tls:
+      insecure: true
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(profileYAML)
+			utils.Run(cmd)
+			time.Sleep(3 * time.Second)
+
+			By("Deploying a Job with telemetry enabled")
+			jobYAML := `
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-job
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        telemetry: "enable"
+        podbeacon.io/profile: "workload-test"
+    spec:
+      containers:
+      - name: task
+        image: busybox:latest
+        command: ["echo", "job done"]
+      restartPolicy: Never
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(jobYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Job")
+
+			By("Verifying Job pod is injected and Job completes successfully")
+			verifyJobComplete := func(g Gomega) {
+				// Job should eventually complete
+				cmd = exec.Command("kubectl", "get", "job", "test-job", "-n", "default", "-o", "jsonpath={.status.conditions[?(@.type=='Complete')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"))
+				
+				// Verify the pod was injected
+				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "job-name=test-job", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\.io/injected']}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyJobComplete, 3*time.Minute).Should(Succeed())
+
+			By("Deploying a Deployment with telemetry enabled")
+			deployYAML := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deploy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-deploy
+  template:
+    metadata:
+      labels:
+        app: test-deploy
+      annotations:
+        telemetry: "enable"
+        podbeacon.io/profile: "workload-test"
+    spec:
+      containers:
+      - name: task
+        image: busybox:latest
+        command: ["sleep", "3600"]
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(deployYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Deployment")
+
+			By("Verifying Deployment pod is injected")
+			verifyDeployInjected := func(g Gomega) {
+				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-deploy", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\.io/injected']}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyDeployInjected, 2*time.Minute).Should(Succeed())
+
+			By("Cleaning up T-2 resources")
+			cmd = exec.Command("kubectl", "delete", "job", "test-job", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "deployment", "test-deploy", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "telemetryprofile", "workload-test", "-n", "default", "--ignore-not-found")
+			utils.Run(cmd)
+		})
+
+		It("should inject correctly under restricted PSS and handle cert rotation (T-3)", func() {
+			By("Creating a restricted namespace")
+			cmd := exec.Command("kubectl", "create", "ns", "restricted-ns")
+			utils.Run(cmd)
+			cmd = exec.Command("kubectl", "label", "ns", "restricted-ns", "pod-security.kubernetes.io/enforce=restricted")
+			utils.Run(cmd)
+
+			By("Creating a TelemetryProfile in restricted-ns")
+			profileYAML := `
+apiVersion: telemetry.podbeacon.io/v1alpha1
+kind: TelemetryProfile
+metadata:
+  name: restricted-test
+  namespace: restricted-ns
+spec:
+  signals: ["traces"]
+  exporter:
+    endpoint: "otel-collector.monitoring.svc.cluster.local:4317"
+    tls:
+      insecure: true
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(profileYAML)
+			utils.Run(cmd)
+			time.Sleep(3 * time.Second)
+
+			By("Rotating the webhook certificate")
+			cmd = exec.Command("kubectl", "delete", "secret", "webhook-server-cert", "-n", namespace)
+			utils.Run(cmd)
+			// Wait for cert-manager to recreate it
+			verifyCertRecreated := func(g Gomega) {
+				cmd = exec.Command("kubectl", "get", "secret", "webhook-server-cert", "-n", namespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			Eventually(verifyCertRecreated, 1*time.Minute).Should(Succeed())
+			time.Sleep(10 * time.Second) // wait for webhook server to pick up new cert and for admission registration to update
+
+			By("Deploying a pod in restricted namespace")
+			// A restricted pod needs a securityContext that drops all capabilities, runs as non-root, etc.
+			podYAML := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restricted-pod
+  namespace: restricted-ns
+  annotations:
+    telemetry: "enable"
+    podbeacon.io/profile: "restricted-test"
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: my-app
+    image: busybox:latest
+    command: ["sleep", "3600"]
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = bytes.NewBufferString(podYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create restricted pod")
+
+			By("Verifying restricted pod is injected and starts successfully")
+			verifyRestrictedInjected := func(g Gomega) {
+				cmd = exec.Command("kubectl", "get", "pod", "restricted-pod", "-n", "restricted-ns", "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+
+				cmd = exec.Command("kubectl", "get", "pod", "restricted-pod", "-n", "restricted-ns", "-o", "jsonpath={.metadata.annotations['podbeacon\\.io/injected']}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyRestrictedInjected, 2*time.Minute).Should(Succeed())
+
+			By("Cleaning up T-3 resources")
+			cmd = exec.Command("kubectl", "delete", "ns", "restricted-ns")
 			utils.Run(cmd)
 		})
 	})

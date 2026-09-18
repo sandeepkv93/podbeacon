@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -15,10 +15,15 @@ import (
 
 // OTelConfig represents the structure of the collector config
 type OTelConfig struct {
-	Receivers  Receivers  `yaml:"receivers"`
-	Processors Processors `yaml:"processors"`
-	Exporters  Exporters  `yaml:"exporters"`
-	Service    Service    `yaml:"service"`
+	Receivers  Receivers            `yaml:"receivers"`
+	Processors Processors           `yaml:"processors"`
+	Exporters  Exporters            `yaml:"exporters"`
+	Extensions map[string]Extension `yaml:"extensions"`
+	Service    Service              `yaml:"service"`
+}
+
+type Extension struct {
+	Endpoint string `yaml:"endpoint"`
 }
 
 type Receivers struct {
@@ -59,11 +64,21 @@ type Exporters struct {
 }
 
 type OTLPExporter struct {
-	Endpoint            string            `yaml:"endpoint"`
-	TLS                 TLSConfig         `yaml:"tls"`
-	Headers             map[string]string `yaml:"headers,omitempty"`
-	QueueSize           int32             `yaml:"queueSize,omitempty"`
-	RetryMaxElapsedTime string            `yaml:"retryMaxElapsedTime,omitempty"`
+	Endpoint       string            `yaml:"endpoint"`
+	TLS            TLSConfig         `yaml:"tls"`
+	Headers        map[string]string `yaml:"headers,omitempty"`
+	SendingQueue   SendingQueue      `yaml:"sending_queue"`
+	RetryOnFailure RetryOnFailure    `yaml:"retry_on_failure"`
+}
+
+type SendingQueue struct {
+	Enabled   bool  `yaml:"enabled"`
+	QueueSize int32 `yaml:"queue_size"`
+}
+
+type RetryOnFailure struct {
+	Enabled        bool   `yaml:"enabled"`
+	MaxElapsedTime string `yaml:"max_elapsed_time"`
 }
 
 type TLSConfig struct {
@@ -139,15 +154,26 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 				Timeout:       timeout,
 			},
 		},
+		Extensions: map[string]Extension{
+			"health_check": {
+				Endpoint: "0.0.0.0:13133",
+			},
+		},
 		Exporters: Exporters{
 			OTLP: OTLPExporter{
 				Endpoint: profile.Spec.Exporter.Endpoint,
 				TLS: TLSConfig{
 					Insecure: profile.Spec.Exporter.TLS != nil && profile.Spec.Exporter.TLS.Insecure,
 				},
-				QueueSize:           queueSize,
-				RetryMaxElapsedTime: retryMax,
-				Headers:             make(map[string]string),
+				SendingQueue: SendingQueue{
+					Enabled:   true,
+					QueueSize: queueSize,
+				},
+				RetryOnFailure: RetryOnFailure{
+					Enabled:        true,
+					MaxElapsedTime: retryMax,
+				},
+				Headers: make(map[string]string),
 			},
 		},
 		Service: Service{
@@ -158,7 +184,7 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 
 	// Add headers from secret keys
 	if profile.Spec.Exporter.HeadersSecretRef != nil && len(headerKeys) > 0 {
-		sort.Strings(headerKeys)
+		slices.Sort(headerKeys)
 		for _, k := range headerKeys {
 			cfg.Exporters.OTLP.Headers[k] = fmt.Sprintf("${env:%s}", k)
 		}
@@ -175,11 +201,11 @@ func GenerateConfig(profile *telemetryv1alpha1.TelemetryProfile, headerKeys []st
 	}
 
 	// Deterministic ordering of signals
-	sigStrs := []string{}
+	sigStrs := make([]string, 0, len(signals))
 	for _, s := range signals {
 		sigStrs = append(sigStrs, string(s))
 	}
-	sort.Strings(sigStrs)
+	slices.Sort(sigStrs)
 
 	for _, s := range sigStrs {
 		cfg.Service.Pipelines[s] = Pipeline{

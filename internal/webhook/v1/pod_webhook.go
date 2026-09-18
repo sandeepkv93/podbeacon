@@ -139,10 +139,26 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 		}
 	}
 
+	allowPrivilegeEscalation := false
+	runAsNonRoot := true
+	runAsUser := int64(1000)
+	runAsGroup := int64(1000)
 	sidecar := corev1.Container{
 		Name:          CollectorContainerName,
 		Image:         CollectorImage,
 		RestartPolicy: &restartPolicy,
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+			RunAsNonRoot: &runAsNonRoot,
+			RunAsUser:    &runAsUser,
+			RunAsGroup:   &runAsGroup,
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
+		},
 		Args: []string{
 			"--config=/conf/relay.yaml",
 		},
