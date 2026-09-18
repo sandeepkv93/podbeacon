@@ -158,13 +158,15 @@ var _ = Describe("Manager", Ordered, func() {
 				podOutput, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				podNames := utils.GetNonEmptyLines(podOutput)
-				g.Expect(podNames).To(HaveLen(1))
+				g.Expect(podNames).To(HaveLen(2))
 				controllerPodName = podNames[0]
 
-				cmd = exec.Command("kubectl", "get", "pods", controllerPodName, "-o", "jsonpath={.status.phase}", "-n", namespace)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Running"))
+				for _, pod := range podNames {
+					cmd = exec.Command("kubectl", "get", "pods", pod, "-o", "jsonpath={.status.phase}", "-n", namespace)
+					output, err := utils.Run(cmd)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(output).To(Equal("Running"))
+				}
 			}
 			Eventually(verifyControllerUp).Should(Succeed())
 		})
