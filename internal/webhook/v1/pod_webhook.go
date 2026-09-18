@@ -344,7 +344,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 		foundVolume := false
 		for _, v := range obj.Spec.Volumes {
 			if v.Name == expectedVolume.Name {
-				if v.VolumeSource.ConfigMap == nil || v.VolumeSource.ConfigMap.Name != expectedVolume.VolumeSource.ConfigMap.Name {
+				if v.ConfigMap == nil || v.ConfigMap.Name != expectedVolume.ConfigMap.Name {
 					return fmt.Errorf("injected volume mismatch")
 				}
 				foundVolume = true
