@@ -20,9 +20,6 @@ webhooks:
       values:
       - kube-system
       - podbeacon-system
-  objectSelector:
-    matchLabels:
-      telemetry: enable
   reinvocationPolicy: IfNeeded
   rules:
   - apiGroups:

@@ -57,7 +57,7 @@ func SetupPodWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,reinvocationPolicy=IfNeeded,groups="",resources=pods,verbs=create,versions=v1,name=mpod.telemetry.podbeacon.io,admissionReviewVersions=v1,timeoutSeconds=5,patch=`{"namespaceSelector":{"matchExpressions":[{"key":"kubernetes.io/metadata.name","operator":"NotIn","values":["kube-system","podbeacon-system"]}]},"objectSelector":{"matchLabels":{"telemetry":"enable"}}}`
+// +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,reinvocationPolicy=IfNeeded,groups="",resources=pods,verbs=create,versions=v1,name=mpod.telemetry.podbeacon.io,admissionReviewVersions=v1,timeoutSeconds=5,patch=`{"namespaceSelector":{"matchExpressions":[{"key":"kubernetes.io/metadata.name","operator":"NotIn","values":["kube-system","podbeacon-system"]}]}}`
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups=telemetry.podbeacon.io,resources=telemetryprofiles,verbs=get;list;watch
