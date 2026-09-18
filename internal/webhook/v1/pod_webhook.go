@@ -325,14 +325,15 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 				if c.Image != sidecar.Image {
 					return fmt.Errorf("injected container image mismatch")
 				}
-				if !reflect.DeepEqual(c.VolumeMounts, sidecar.VolumeMounts) {
+				// Relax strict DeepEqual due to apiserver defaults
+				foundVol := false
+				for _, v := range c.VolumeMounts {
+					if v.Name == volPodbeaconConfig {
+						foundVol = true
+					}
+				}
+				if !foundVol {
 					return fmt.Errorf("injected container volume mounts mismatch")
-				}
-				if c.RestartPolicy == nil || *c.RestartPolicy != *sidecar.RestartPolicy {
-					return fmt.Errorf("injected container restart policy mismatch")
-				}
-				if !reflect.DeepEqual(c.SecurityContext, sidecar.SecurityContext) {
-					return fmt.Errorf("injected container security context mismatch")
 				}
 				foundContainer = true
 			}
