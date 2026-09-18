@@ -16,8 +16,13 @@ limitations under the License.
 
 package v1
 
-//nolint:goconst,ineffassign
+//nolint:ineffassign
 
+const (
+	valTestConfig = valTestConfig
+	valAbcdef = valAbcdef
+	valEnable = valEnable
+)
 import (
 	"context"
 
@@ -68,8 +73,8 @@ var _ = Describe("Pod Webhook", func() {
 					LastTransitionTime: metav1.Now(),
 				},
 			}
-			profile.Status.ConfigMapName = "test-config"
-			profile.Status.ConfigHash = "abcdef"
+			profile.Status.ConfigMapName = valTestConfig
+			profile.Status.ConfigHash = valAbcdef
 			err = k8sClient.Status().Update(ctx, profile)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -77,10 +82,10 @@ var _ = Describe("Pod Webhook", func() {
 			t := true
 			cm = &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-config",
+					Name:      valTestConfig,
 					Namespace: defaultNamespace,
 					Labels: map[string]string{
-						AnnotationConfigHash: "abcdef",
+						AnnotationConfigHash: valAbcdef,
 						AnnotationProfileUID: string(profile.UID),
 					},
 				},
@@ -100,7 +105,7 @@ var _ = Describe("Pod Webhook", func() {
 		})
 
 		AfterEach(func() {
-			cmToDelete := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-config", Namespace: defaultNamespace}}
+			cmToDelete := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: valTestConfig, Namespace: defaultNamespace}}
 			_ = k8sClient.Delete(ctx, cmToDelete)
 			_ = k8sClient.Delete(ctx, profile)
 		})
@@ -111,7 +116,7 @@ var _ = Describe("Pod Webhook", func() {
 					Name:      "test-pod",
 					Namespace: defaultNamespace,
 					Annotations: map[string]string{
-						"telemetry": "enable",
+						"telemetry": valEnable,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -159,7 +164,7 @@ var _ = Describe("Pod Webhook", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-windows",
 					Namespace:   defaultNamespace,
-					Annotations: map[string]string{"telemetry": "enable"},
+					Annotations: map[string]string{"telemetry": valEnable},
 				},
 				Spec: corev1.PodSpec{
 					OS: &corev1.PodOS{Name: corev1.Windows},
@@ -175,7 +180,7 @@ var _ = Describe("Pod Webhook", func() {
 					Name:      "test-foreign",
 					Namespace: defaultNamespace,
 					Annotations: map[string]string{
-						"telemetry":                       "enable",
+						"telemetry":                       valEnable,
 						"sidecar.opentelemetry.io/inject": "true",
 					},
 				},
@@ -189,7 +194,7 @@ var _ = Describe("Pod Webhook", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-vol-conflict",
 					Namespace:   defaultNamespace,
-					Annotations: map[string]string{"telemetry": "enable"},
+					Annotations: map[string]string{"telemetry": valEnable},
 				},
 				Spec: corev1.PodSpec{
 					Volumes: []corev1.Volume{{Name: "podbeacon-config"}},
@@ -206,10 +211,10 @@ var _ = Describe("Pod Webhook", func() {
 			t := true
 			newCm := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-config",
+					Name:      valTestConfig,
 					Namespace: defaultNamespace,
 					Labels: map[string]string{
-						AnnotationConfigHash: "abcdef",
+						AnnotationConfigHash: valAbcdef,
 						AnnotationProfileUID: string(profile.UID),
 					},
 				},
@@ -225,7 +230,7 @@ var _ = Describe("Pod Webhook", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-cm",
 					Namespace:   defaultNamespace,
-					Annotations: map[string]string{"telemetry": "enable"},
+					Annotations: map[string]string{"telemetry": valEnable},
 				},
 			}
 			err = defaulter.Default(ctx, pod)
@@ -238,10 +243,10 @@ var _ = Describe("Pod Webhook", func() {
 					Name:      "test-spoofed",
 					Namespace: defaultNamespace,
 					Annotations: map[string]string{
-						"telemetry":          "enable",
+						"telemetry":          valEnable,
 						AnnotationInjected:   "true",
 						AnnotationProfileUID: string(profile.UID),
-						AnnotationConfigHash: "abcdef",
+						AnnotationConfigHash: valAbcdef,
 					},
 				},
 				Spec: corev1.PodSpec{},
@@ -256,7 +261,7 @@ var _ = Describe("Pod Webhook", func() {
 					Name:      "test-pod",
 					Namespace: defaultNamespace,
 					Annotations: map[string]string{
-						"telemetry": "enable",
+						"telemetry": valEnable,
 					},
 				},
 				Spec: corev1.PodSpec{
