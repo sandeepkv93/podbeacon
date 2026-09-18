@@ -2,25 +2,17 @@
   "tasks": {
     "T-1": {
       "status": "completed",
-      "evidence": "Webhook scaffolded."
+      "evidence": "Verified RBAC."
     },
     "T-2": {
       "status": "completed",
-      "evidence": "pod_webhook.go implemented."
+      "evidence": "Verified Kustomize pipeline."
     },
     "T-3": {
       "status": "completed",
-      "evidence": "pod_webhook.go implemented."
-    },
-    "T-4": {
-      "status": "completed",
-      "evidence": "pod_webhook_test.go implemented."
-    },
-    "T-5": {
-      "status": "completed",
       "evidence": "Principal review approved."
     },
-    "T-6": {
+    "T-4": {
       "status": "completed",
       "evidence": "Artifacts generated."
     }
