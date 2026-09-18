@@ -1,0 +1,20 @@
+--- test/e2e/e2e_test.go	2026-09-18 15:00:00.000000000 -0700
++++ test/e2e/e2e_test.go.new	2026-09-18 15:00:00.000000000 -0700
+@@ -279,6 +279,15 @@
+ 				g.Expect(output).To(Equal("true"))
+ 			}
+-			Eventually(verifyWorkloadsInjected, 2*time.Minute).Should(Succeed())
++			err := wait.PollImmediate(5*time.Second, 2*time.Minute, func() (bool, error) {
++				cmd := exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-sts", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\\\.io/injected']}")
++				output, err := utils.Run(cmd)
++				if err != nil || output != "true" { return false, nil }
++				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-ds", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\\\.io/injected']}")
++				output, err = utils.Run(cmd)
++				if err != nil || output != "true" { return false, nil }
++				return true, nil
++			})
++			if err != nil {
++				out, _ := exec.Command("sh", "-c", "kubectl get events -n default && kubectl get pods -A && kubectl get telemetryprofile -A -o yaml && kubectl logs -n podbeacon-system -l control-plane=controller-manager --tail=100").CombinedOutput()
++				Fail(fmt.Sprintf("Timeout! Diagnostics:\\n%s", string(out)))
++			}
+ 		})

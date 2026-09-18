@@ -264,20 +264,27 @@ spec:
 			Expect(applyYAML(workloadsYAML)).To(Succeed())
 			defer deleteYAML(workloadsYAML)
 
-			verifyWorkloadsInjected := func(g Gomega) {
+			err := wait.PollImmediate(5*time.Second, 2*time.Minute, func() (bool, error) {
 				// Check StatefulSet
-				cmd := exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-sts", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\.io/injected']}")
+				cmd := exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-sts", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\.io/injected']}")
 				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("true"))
+				if err != nil || output != "true" {
+					return false, nil
+				}
 
 				// Check DaemonSet
-				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-ds", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\.io/injected']}")
+				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-ds", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\.io/injected']}")
 				output, err = utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("true"))
+				if err != nil || output != "true" {
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				out, _ := exec.Command("sh", "-c", "kubectl get events -n default && kubectl get pods -A && kubectl get telemetryprofile -A -o yaml && kubectl logs -n podbeacon-system -l control-plane=controller-manager --tail=100").CombinedOutput()
+				Fail(fmt.Sprintf("Timeout! Diagnostics:
+%s", string(out)))
 			}
-			Eventually(verifyWorkloadsInjected, 2*time.Minute).Should(Succeed())
 		})
 
 		It("should support HTTP OTLP and verify signal delivery (T-1/T-5)", func() {
