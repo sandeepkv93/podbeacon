@@ -30,6 +30,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/sandeepkv93/podbeacon/test/utils"
 )
@@ -266,14 +267,14 @@ spec:
 
 			err := wait.PollImmediate(5*time.Second, 2*time.Minute, func() (bool, error) {
 				// Check StatefulSet
-				cmd := exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-sts", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\.io/injected']}")
+				cmd := exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-sts", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\.io/injected']}")
 				output, err := utils.Run(cmd)
 				if err != nil || output != "true" {
 					return false, nil
 				}
 
 				// Check DaemonSet
-				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-ds", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\.io/injected']}")
+				cmd = exec.Command("kubectl", "get", "pods", "-n", "default", "-l", "app=test-ds", "-o", "jsonpath={.items[0].metadata.annotations['podbeacon\\.io/injected']}")
 				output, err = utils.Run(cmd)
 				if err != nil || output != "true" {
 					return false, nil
@@ -282,8 +283,7 @@ spec:
 			})
 			if err != nil {
 				out, _ := exec.Command("sh", "-c", "kubectl get events -n default && kubectl get pods -A && kubectl get telemetryprofile -A -o yaml && kubectl logs -n podbeacon-system -l control-plane=controller-manager --tail=100").CombinedOutput()
-				Fail(fmt.Sprintf("Timeout! Diagnostics:
-%s", string(out)))
+				Fail(fmt.Sprintf("Timeout! Diagnostics:\n%s", string(out)))
 			}
 		})
 
@@ -312,7 +312,7 @@ spec:
 			defer deleteYAML(emitterYAML)
 
 			verifyHttpInjected := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", "http-emitter", "-n", "default", "-o", "jsonpath={.metadata.annotations['podbeacon\\.io/injected']}")
+				cmd := exec.Command("kubectl", "get", "pod", "http-emitter", "-n", "default", "-o", "jsonpath={.metadata.annotations['podbeacon\\\\.io/injected']}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("true"))
@@ -354,7 +354,7 @@ spec:
 			// Should not inject sidecar if already marked injected
 			Expect(applyYAML(spoofedPodYAML)).To(Succeed())
 			defer deleteYAML(spoofedPodYAML)
-			
+
 			verifySpoofed := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "pod", "spoofed-pod", "-n", "default", "-o", "jsonpath={.spec.initContainers[*].name}")
 				output, _ := utils.Run(cmd)
