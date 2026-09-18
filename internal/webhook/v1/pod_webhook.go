@@ -46,6 +46,9 @@ const (
 
 	CollectorContainerName = "podbeacon-collector"
 	CollectorImage         = "otel/opentelemetry-collector:0.120.0"
+
+	valTrue            = "true"
+	volPodbeaconConfig = "podbeacon-config"
 )
 
 func SetupPodWebhookWithManager(mgr ctrl.Manager) error {
@@ -87,7 +90,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 
 	// Check for conflicting containers
 	for _, c := range obj.Spec.InitContainers {
-		if c.Name == CollectorContainerName && obj.Annotations[AnnotationInjected] != "true" {
+		if c.Name == CollectorContainerName && obj.Annotations[AnnotationInjected] != valTrue {
 			return fmt.Errorf("container name conflict: %s already exists", CollectorContainerName)
 		}
 	}
@@ -99,7 +102,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 
 	// Finding 11: existing podbeacon-config volume
 	for _, v := range obj.Spec.Volumes {
-		if v.Name == "podbeacon-config" && obj.Annotations[AnnotationInjected] != "true" {
+		if v.Name == volPodbeaconConfig && obj.Annotations[AnnotationInjected] != valTrue {
 			return fmt.Errorf("volume podbeacon-config already exists")
 		}
 	}
@@ -289,7 +292,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      "podbeacon-config",
+				Name:      volPodbeaconConfig,
 				MountPath: "/conf",
 				ReadOnly:  true,
 			},
@@ -297,7 +300,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 	}
 
 	expectedVolume := corev1.Volume{
-		Name: "podbeacon-config",
+		Name: volPodbeaconConfig,
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
@@ -307,8 +310,8 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 		},
 	}
 
-	// Finding 2: Validate existing injected shape if podbeacon.io/injected == "true"
-	if obj.Annotations[AnnotationInjected] == "true" {
+	// Finding 2: Validate existing injected shape if podbeacon.io/injected == valTrue
+	if obj.Annotations[AnnotationInjected] == valTrue {
 		if obj.Annotations[AnnotationProfileUID] != string(profile.UID) {
 			return fmt.Errorf("injected profile UID mismatch")
 		}
@@ -360,7 +363,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 	if obj.Annotations == nil {
 		obj.Annotations = make(map[string]string)
 	}
-	obj.Annotations[AnnotationInjected] = "true"
+	obj.Annotations[AnnotationInjected] = valTrue
 	obj.Annotations[AnnotationProfileUID] = string(profile.UID)
 	obj.Annotations[AnnotationConfigHash] = profile.Status.ConfigHash
 
