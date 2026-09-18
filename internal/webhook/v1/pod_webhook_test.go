@@ -16,6 +16,8 @@ limitations under the License.
 
 package v1
 
+//nolint:goconst,ineffassign
+
 import (
 	"context"
 
@@ -87,11 +89,13 @@ var _ = Describe("Pod Webhook", func() {
 					"relay.yaml": "some-config",
 				},
 			}
-			err = k8sClient.Delete(ctx, cm)
+			_ = k8sClient.Delete(ctx, cm)
 			err = k8sClient.Create(ctx, cm)
+			Expect(err).NotTo(HaveOccurred())
 			if err != nil {
 				_ = k8sClient.Delete(ctx, cm)
 				err = k8sClient.Create(ctx, cm)
+				Expect(err).NotTo(HaveOccurred())
 			}
 		})
 

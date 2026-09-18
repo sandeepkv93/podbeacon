@@ -16,6 +16,8 @@ limitations under the License.
 
 package v1
 
+//nolint:goconst
+
 import (
 	"context"
 	"fmt"
@@ -61,6 +63,7 @@ type PodDefaulter struct {
 	Client client.Client
 }
 
+//nolint:gocyclo
 func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 	// Skip if it doesn't have the exact opt-in annotation
 	if obj.Annotations == nil || obj.Annotations[AnnotationTelemetryOptIn] != "enable" {
@@ -74,7 +77,7 @@ func (d *PodDefaulter) Default(ctx context.Context, obj *corev1.Pod) error {
 
 	// Finding 11: Windows pods
 	if obj.Spec.OS != nil && obj.Spec.OS.Name == corev1.Windows {
-		return fmt.Errorf("Windows pods are not supported")
+		return fmt.Errorf("windows pods are not supported")
 	}
 
 	// Finding 11: Foreign OTel annotation

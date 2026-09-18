@@ -116,6 +116,7 @@ func (r *TelemetryProfileReconciler) Reconcile(ctx context.Context, req ctrl.Req
 				"podbeacon.io/config-hash": hash,
 			},
 		},
+		//nolint:modernize
 		Immutable: ptr.To(true),
 		Data: map[string]string{
 			"relay.yaml": configStr,
