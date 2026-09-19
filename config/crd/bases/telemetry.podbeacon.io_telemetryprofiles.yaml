@@ -72,7 +72,7 @@ spec:
                   endpoint:
                     description: Endpoint is the required OTLP/gRPC host:port
                     minLength: 1
-                    pattern: ^[a-zA-Z0-9.-]+:\d+$
+                    pattern: ^(https?://)?[a-zA-Z0-9.-]+:\d+$
                     type: string
                   headersSecretRef:
                     description: HeadersSecretRef points to a Secret whose keys map

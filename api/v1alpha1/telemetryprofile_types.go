@@ -47,7 +47,7 @@ type ExporterSpec struct {
 	// Endpoint is the required OTLP/gRPC host:port
 	// +required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+:\d+$`
+	// +kubebuilder:validation:Pattern=`^(https?://)?[a-zA-Z0-9.-]+:\d+$`
 	Endpoint string `json:"endpoint"`
 
 	// TLS configuration for the exporter
