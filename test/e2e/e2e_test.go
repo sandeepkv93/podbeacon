@@ -312,7 +312,7 @@ spec:
 			defer deleteYAML(emitterYAML)
 
 			verifyHttpInjected := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", "http-emitter", "-n", "default", "-o", "jsonpath={.metadata.annotations['podbeacon\\\\.io/injected']}")
+				cmd := exec.Command("kubectl", "get", "pod", "http-emitter", "-n", "default", "-o", "jsonpath={.metadata.annotations['podbeacon\\.io/injected']}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("true"))
@@ -335,7 +335,7 @@ spec:
 `
 			Expect(applyYAML(malformedProfile)).NotTo(Succeed(), "Malformed profile should be rejected by validation")
 
-			By("Testing spoofed marker idempotency and dry-run")
+			By("Testing spoofed marker rejection")
 			spoofedPodYAML := `
 apiVersion: v1
 kind: Pod
@@ -351,16 +351,16 @@ spec:
     image: busybox:latest
     command: ["sleep", "3600"]
 `
-			// Should not inject sidecar if already marked injected
-			Expect(applyYAML(spoofedPodYAML)).To(Succeed())
+			// Spoofed marker without valid collector container and volume must be rejected
+			Expect(applyYAML(spoofedPodYAML)).NotTo(Succeed(), "Spoofed marker should be rejected by admission webhook")
 			defer deleteYAML(spoofedPodYAML)
 
 			verifySpoofed := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", "spoofed-pod", "-n", "default", "-o", "jsonpath={.spec.initContainers[*].name}")
-				output, _ := utils.Run(cmd)
-				g.Expect(output).NotTo(ContainSubstring("podbeacon-collector"))
+				cmd := exec.Command("kubectl", "get", "pod", "spoofed-pod", "-n", "default")
+				_, err := utils.Run(cmd)
+				g.Expect(err).To(HaveOccurred())
 			}
-			Eventually(verifySpoofed, 1*time.Minute).Should(Succeed())
+			Eventually(verifySpoofed, 30*time.Second).Should(Succeed())
 		})
 	})
 })
